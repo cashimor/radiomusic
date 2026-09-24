@@ -1,0 +1,4 @@
+/build/
+/library/
+/test-output/
+*.user
