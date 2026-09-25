@@ -53,7 +53,7 @@ int main() {
         check(music::estimateKey(chord).key == 0, "Clear major chord detection failed");
         check(music::estimateKey(std::vector<music::Frame>(music::sampleRate)).key == -1, "Silence assigned a key");
 
-        for (double frequency : {50.0, 150.0, 1000.0}) {
+        for (double frequency : {50.0, 110.0, 220.0, 440.0, 1000.0}) {
             music::Clip tone; tone.audio.resize(music::sampleRate * 3);
             for (size_t i = 0; i < tone.audio.size(); ++i) {
                 float x = float(0.3 * std::sin(tau * frequency * i / music::sampleRate)); tone.audio[i] = {x, x};
@@ -62,11 +62,52 @@ int main() {
             for (size_t i = 0; i < sum.size(); ++i) sum[i].l += tone.high[i].l;
             double reference = rms(tone.audio), low = rms(tone.low) / reference, high = rms(tone.high) / reference;
             check(std::abs(rms(sum) / reference - 1) < 0.005, "Crossover bands do not sum to flat magnitude");
-            if (frequency == 150) check(std::abs(low - 0.5) < 0.005 && std::abs(high - 0.5) < 0.005, "Crossover is not -6 dB at 150 Hz");
+            if (frequency == 220) check(std::abs(low - 0.5) < 0.005 && std::abs(high - 0.5) < 0.005, "Crossover is not -6 dB at 220 Hz");
             if (frequency == 50) check(low > 0.98 && high < 0.015, "Bass separation failed");
-            if (frequency == 1000) check(high > 0.995 && low < 0.001, "Upper-band separation failed");
+            if (frequency == 1000) check(high > 0.995 && low < 0.003, "Upper-band separation failed");
         }
-        std::cout << "150 Hz four-pole crossover: separation and flat summation passed.\n";
+        std::cout << "220 Hz four-pole crossover: separation and flat summation passed.\n";
+        for (double hz : {50.0, 1000.0}) {
+            music::FrequencyMonitor monitor;
+            for (int mode : {1, 2, 0}) {
+                std::vector<music::Frame> result(music::sampleRate * 2);
+                for (size_t i = 0; i < result.size(); ++i) {
+                    float v = float(0.2 * std::sin(tau * hz * i / music::sampleRate));
+                    result[i] = monitor.process({v, -v}, mode);
+                    check(std::isfinite(result[i].l) && std::abs(result[i].l + result[i].r) < 1e-6,
+                          "Frequency monitor damaged stereo output");
+                    if (mode == 0 && i > music::sampleRate)
+                        check(std::abs(result[i].l - v) < 1e-6, "Both mode did not restore original output");
+                }
+                double ratio = rms(result) / (0.2 / std::sqrt(2.0));
+                bool pass = mode == 0 || (mode == 1 && hz == 1000) || (mode == 2 && hz == 50);
+                check(pass ? ratio > 0.98 : ratio < 0.015, "Frequency monitor selected the wrong band");
+            }
+        }
+
+        music::Clip quiet, loud, silence, transient;
+        quiet.audio.resize(music::sampleRate * 2); loud.audio.resize(quiet.audio.size());
+        for (size_t i = 0; i < quiet.audio.size(); ++i) {
+            float v = float(0.06 * (std::sin(tau * 50 * i / music::sampleRate) + std::sin(tau * 1000 * i / music::sampleRate)));
+            quiet.audio[i] = {v, v * 0.5f}; loud.audio[i] = {v * 4, v * 2};
+        }
+        auto original = quiet.audio;
+        music::prepareBands(quiet); music::prepareBands(loud);
+        check(std::abs(rms(quiet.audio) * quiet.playbackGain - rms(loud.audio) * loud.playbackGain) < 0.001,
+              "Full-loop levels did not match");
+        check(std::abs(rms(quiet.low) * quiet.lowGain - rms(loud.low) * loud.lowGain) < 0.001 &&
+              std::abs(rms(quiet.high) * quiet.highGain - rms(loud.high) * loud.highGain) < 0.001,
+              "Split-band levels did not match");
+        check(quiet.audio[100].l == original[100].l && quiet.audio[100].r == original[100].r,
+              "Playback normalization modified source audio");
+        float previousGain = quiet.lowGain; music::prepareBands(quiet);
+        check(quiet.lowGain == previousGain, "Repeated preparation compounded normalization");
+        silence.audio.resize(music::sampleRate); music::prepareBands(silence);
+        check(silence.playbackGain == 1 && silence.lowGain == 1 && silence.highGain == 1, "Silence was boosted");
+        transient.audio.resize(music::sampleRate, {0.01f, 0.005f}); transient.audio[100] = {1, 0.5f};
+        music::prepareBands(transient);
+        check(transient.playbackGain <= 0.80001f, "Normalization failed to reserve peak headroom");
+        std::cout << "Loop and split-band normalization, silence and peak protection passed.\n";
 
         check(music::compatibleTempo(130, 140) && music::compatibleTempo(140, 130), "130-140 BPM sources should match in both directions");
         check(music::compatibleTempo(100, 110) && music::compatibleTempo(100, 90), "Speed-change boundary rejected");
@@ -112,6 +153,13 @@ int main() {
         auto arrangement = chops.bars(); check(arrangement[0].changed, "First sequence was left unchanged");
         for (int i = 0; i < phrase - 10; ++i) {
             double position = chops.beat(); int beat = int(position); auto out = chops.next(one);
+            // The send straddles the change, including across the phrase wrap.
+            double sendPosition = chops.beat() / 4;
+            int outgoing = (int(sendPosition) + (sendPosition - int(sendPosition) < 0.5 ? 7 : 0)) % 8;
+            const auto& before = arrangement[outgoing];
+            const auto& after = arrangement[(outgoing + 1) % 8];
+            int change = int(before.sourceBar != after.sourceBar) + int(before.beats != after.beats);
+            check(chops.reverbSend() == (change >= 2), "Reverb send did not run midpoint to midpoint");
             double fraction = position - beat;
             if (fraction > 0.2 && fraction < 0.8 && i > music::sampleRate) {
                 const auto& bar = arrangement[beat / 4];
@@ -140,7 +188,7 @@ int main() {
                     double position = phase * audio.size(); size_t i = size_t(position); float fraction = float(position - i);
                     return audio[i].l + (audio[(i + 1) % audio.size()].l - audio[i].l) * fraction;
                 };
-                float expected = (interpolate(high->high, hp) + interpolate(low->low, lp)) * 0.72f;
+                float expected = (interpolate(high->high, hp) * high->highGain + interpolate(low->low, lp) * low->lowGain) * 0.72f;
                 check(std::abs(out.l - expected) < 0.0001, "Displayed bass/high provenance differs from rendered samples");
             }
         }

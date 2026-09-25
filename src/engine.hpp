@@ -35,6 +35,8 @@ public:
     bool playful() const { return playful_; }
     void setReverb(bool value) { reverb_ = value; }
     bool reverb() const { return reverb_; }
+    void setMonitor(int value) { monitor_ = value; }
+    int monitor() const { return monitor_; }
     void setVolume(float value) { volume_ = value; }
     void setRadio(bool value) { radio_ = value; }
     bool radio() const { return radio_; }
@@ -51,6 +53,7 @@ private:
     std::atomic<bool> running_{false}, evolve_{false}, radio_{false};
     std::atomic<bool> playful_{true}, split_{true}, reverb_{false};
     std::atomic<float> volume_{0.55f};
+    std::atomic<int> monitor_{0};
     std::thread network_, analysis_, output_;
     std::mutex mutex_;
     std::condition_variable wake_;

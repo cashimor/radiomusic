@@ -69,7 +69,9 @@ Mixer::Sequence Mixer::compose(const std::vector<ClipPtr>& library) {
 }
 bool Mixer::reverbSend() const {
     if (!current_) return false;
-    const int bar = std::min(7, int(phase_ * 8));
+    // Feed the effect from halfway through the outgoing bar until halfway
+    // through the incoming bar; the effect's delay lines keep the tail alive.
+    const int bar = int(std::floor(phase_ * 8 + 7.5)) % 8;
     const int next = (bar + 1) % 8;
     auto changeScore = [](const Bar& a, const Bar& b) {
         if (!a.clip || !b.clip) return a.clip == b.clip ? 0 : 3;
@@ -98,7 +100,9 @@ Frame Mixer::read(const ClipPtr& clip, double phase, int band) const {
     double pos = phase * audio.size();
     size_t i = std::min(static_cast<size_t>(pos), audio.size() - 1), j = (i + 1) % audio.size();
     float f = float(pos - i);
-    return {audio[i].l + (audio[j].l - audio[i].l) * f, audio[i].r + (audio[j].r - audio[i].r) * f};
+    float gain = band < 0 ? clip->lowGain : band > 0 ? clip->highGain : clip->playbackGain;
+    return {(audio[i].l + (audio[j].l - audio[i].l) * f) * gain,
+            (audio[i].r + (audio[j].r - audio[i].r) * f) * gain};
 }
 Frame Mixer::readArrangement(const Arrangement& plan, double phase, int band) const {
     double position = phase * loopBeats;

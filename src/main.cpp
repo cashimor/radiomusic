@@ -13,9 +13,9 @@ namespace {
 constexpr wchar_t defaultStation[] = L"https://0nlineradio.radioho.st/technolovers-trance";
 constexpr COLORREF background = RGB(16, 21, 29), panel = RGB(26, 33, 44), muted = RGB(151, 168, 189),
     foreground = RGB(236, 243, 249), accent = RGB(95, 226, 183);
-enum { Start = 101, Evolve, Reject, Radio, Folder, Url, Volume, Playful, Split, Reverb };
+enum { Start = 101, Evolve, Reject, Radio, Folder, Url, Volume, Playful, Split, Reverb, Monitor };
 std::unique_ptr<Engine> engine;
-HWND urlBox, startButton, evolveButton, rejectButton, radioButton, folderButton, slider, playfulButton, splitButton, reverbButton;
+HWND urlBox, startButton, evolveButton, rejectButton, radioButton, folderButton, slider, playfulButton, splitButton, reverbButton, monitorButton;
 HFONT bodyFont, titleFont, numberFont, smallFont;
 HBRUSH editBrush;
 float scale = 1;
@@ -84,10 +84,11 @@ void layout(HWND hwnd) {
     RECT rc; GetClientRect(hwnd, &rc); int w = int(rc.right / scale);
     MoveWindow(urlBox, px(28), px(136), px(w - 240), px(36), TRUE);
     MoveWindow(startButton, px(w - 196), px(134), px(168), px(40), TRUE);
-    MoveWindow(evolveButton, px(28), px(576), px(168), px(40), TRUE);
-    MoveWindow(rejectButton, px(208), px(576), px(178), px(40), TRUE);
-    MoveWindow(radioButton, px(398), px(576), px(178), px(40), TRUE);
-    MoveWindow(splitButton, px(588), px(576), px(220), px(40), TRUE);
+    MoveWindow(evolveButton, px(28), px(576), px(130), px(40), TRUE);
+    MoveWindow(rejectButton, px(170), px(576), px(145), px(40), TRUE);
+    MoveWindow(radioButton, px(327), px(576), px(155), px(40), TRUE);
+    MoveWindow(splitButton, px(494), px(576), px(165), px(40), TRUE);
+    MoveWindow(monitorButton, px(671), px(576), px(185), px(40), TRUE);
     MoveWindow(playfulButton, px(28), px(628), px(208), px(36), TRUE);
     MoveWindow(folderButton, px(w - 190), px(628), px(162), px(36), TRUE);
     MoveWindow(reverbButton, px(244), px(628), px(150), px(36), TRUE);
@@ -99,7 +100,8 @@ void refreshButtons() {
     EnableWindow(evolveButton, active); EnableWindow(rejectButton, active); EnableWindow(radioButton, active);
     SetWindowTextW(radioButton, engine->radio() ? L"Return to remix" : L"Hear live radio");
     SetWindowTextW(playfulButton, engine->playful() ? L"Rearrangement: on" : L"Rearrangement: off");
-    SetWindowTextW(splitButton, engine->split() ? L"150 Hz split: on" : L"150 Hz split: off");
+    SetWindowTextW(splitButton, engine->split() ? L"220 Hz split: on" : L"220 Hz split: off");
+    SetWindowTextW(monitorButton, engine->monitor() == 1 ? L"Hear: upper only" : engine->monitor() == 2 ? L"Hear: bass only" : L"Hear: both");
     SetWindowTextW(reverbButton, engine->reverb() ? L"Reverb: on" : L"Reverb: off");
 }
 void paint(HWND hwnd, HDC target) {
@@ -164,7 +166,8 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
         rejectButton = button(hwnd, L"Ban sources   −", Reject); radioButton = button(hwnd, L"Hear live radio", Radio);
         folderButton = button(hwnd, L"Open library", Folder);
         playfulButton = button(hwnd, L"Rearrangement: on", Playful);
-        splitButton = button(hwnd, L"150 Hz split: on", Split);
+        splitButton = button(hwnd, L"220 Hz split: on", Split);
+        monitorButton = button(hwnd, L"Hear: both", Monitor);
         reverbButton = button(hwnd, L"Reverb: off", Reverb);
         slider = CreateWindowW(TRACKBAR_CLASSW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_HORZ | TBS_NOTICKS,
                                0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(Volume), nullptr, nullptr);
@@ -207,6 +210,7 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
         case Radio: engine->setRadio(!engine->radio()); refreshButtons(); break;
         case Playful: engine->setPlayful(!engine->playful()); refreshButtons(); break;
         case Split: engine->setSplit(!engine->split()); refreshButtons(); break;
+        case Monitor: engine->setMonitor((engine->monitor() + 1) % 3); refreshButtons(); break;
         case Reverb: engine->setReverb(!engine->reverb()); refreshButtons(); break;
         case Folder: {
             std::error_code ec; std::filesystem::create_directories(engine->libraryPath(), ec);
@@ -228,7 +232,7 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
                         + L"\nEstimated key: " + wide(music::keyName(bar.key)) + L"\nSource beats: ";
                     for (int beat : bar.beats) details += std::to_wstring(beat + 1) + L" ";
                     if (bar.split) {
-                        details += L"\n\nBASS BELOW 150 HZ\nCapture: " + wide(bar.lowCaptureId) + L"\nSaved loop: " + wide(bar.lowClipId)
+                        details += L"\n\nBASS BELOW 220 HZ\nCapture: " + wide(bar.lowCaptureId) + L"\nSaved loop: " + wide(bar.lowClipId)
                             + L"\nOriginal bar: " + std::to_wstring(bar.lowSourceBar) + L"\nBeats: ";
                         for (int beat : bar.lowBeats) details += std::to_wstring(beat + 1) + L" ";
                     }
@@ -324,7 +328,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         auto bitmap = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
         auto previous = SelectObject(memory, bitmap);
         paint(hwnd, memory);
-        for (HWND child : {urlBox, startButton, evolveButton, rejectButton, radioButton, folderButton, slider, playfulButton, splitButton}) {
+        for (HWND child : {urlBox, startButton, evolveButton, rejectButton, radioButton, folderButton, slider, playfulButton, splitButton, reverbButton, monitorButton}) {
             RECT cr; GetWindowRect(child, &cr); MapWindowPoints(nullptr, hwnd, reinterpret_cast<POINT*>(&cr), 2);
             SetViewportOrgEx(memory, cr.left, cr.top, nullptr);
             SendMessageW(child, WM_PRINT, reinterpret_cast<WPARAM>(memory), PRF_CLIENT | PRF_NONCLIENT | PRF_ERASEBKGND);

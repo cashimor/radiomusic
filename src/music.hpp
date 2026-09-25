@@ -16,8 +16,18 @@ constexpr int transitionPasses = 1;
 constexpr double maxSpeedChange = 0.10;
 constexpr size_t maxStoredClips = 1024;
 constexpr size_t maxResidentClips = 16;
-constexpr double crossoverHz = 150.0;
+constexpr double crossoverHz = 220.0;
 struct Frame { float l = 0, r = 0; };
+// Final-output auditioning: 0 = both, 1 = upper, 2 = bass.
+class FrequencyMonitor {
+public:
+    FrequencyMonitor();
+    ~FrequencyMonitor();
+    Frame process(Frame input, int mode);
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 struct Analysis {
     double bpm = 0;
     double firstBeat = 0;
@@ -37,6 +47,7 @@ struct Clip {
     double sourceSeconds = 0;
     std::vector<Frame> audio;
     std::vector<Frame> low, high;
+    float playbackGain = 1, lowGain = 1, highGain = 1;
     std::atomic<bool> rejected{false};
 };
 using ClipPtr = std::shared_ptr<Clip>;

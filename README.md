@@ -6,13 +6,17 @@ A C++17 Windows radio remixer. It saves beat-aligned source recordings, cuts the
 
 Double-click **Start Radiomusic.cmd**, then **Start listening**. The Technolovers Trance station is already entered. The saved-loop count appears when the window opens, before playback. Existing recordings load automatically. With an empty library, the station plays while approximately 48 seconds of audio are collected and analyzed.
 
-Both **Rearrangement** and **150 Hz split** start enabled. The first remix is already processed; it does not wait several repetitions before changing the source material. The station-to-remix fade takes 16 beats.
+Both **Rearrangement** and **220 Hz split** start enabled. The first remix is already processed; it does not wait several repetitions before changing the source material. The station-to-remix fade takes 16 beats.
 
 ## Controls
 
+- **Hear: both / upper only / bass only:** cycles the final listening output through both bands, above 220 Hz, and below 220 Hz. Switching fades smoothly and leaves the arrangement unchanged. Applies to reverb and live radio too, independently of the source-split toggle. Both restores the unfiltered output.
+
+Reverb, when enabled, receives audio from halfway through the bar before a significant change until halfway through the following bar. Its tail continues naturally after that window closes.
+
 - **Evolve / >:** request the next sequence at the next eight-bar boundary.
 - **Rearrangement on/off:** enable or disable beat-sized cuts, beat repeats, bar reordering, and source substitutions. Changes take effect through a phrase-aligned transition.
-- **150 Hz split on/off:** combine independently sourced bass and upper-frequency parts. Disable to compare against full-band rearrangement. It can also be used with rearrangement off.
+- **220 Hz split on/off:** combine independently sourced bass and upper-frequency parts. Disable to compare against full-band rearrangement. It can also be used with rearrangement off.
 - **Ban sources / −:** permanently ban the source captures under the playhead, including bass/upper sources and both sides of a crossfade. All loops from those 48-second captures are removed, so their bars and beats cannot return in another arrangement. Bans survive restarting. This does not recognize the same song rebroadcast later as a new capture.
 - **Hear live radio:** monitor the original station while capture continues. Return to remix fades back to the processed sequence. Rejection applies to remix playback, not live monitoring.
 - **Stop:** stop playback/capture and preserve the library. A blocked network request can take several seconds to stop.
@@ -22,11 +26,15 @@ Keyboard shortcuts apply when the station address field does not have focus. Eff
 
 ## What changed in the sound
 
+Playback preparation now normalizes each full loop and its bass/upper bands independently using stereo RMS levels. Targets are 0.16 full-band, 0.10 bass, and 0.125 upper-band RMS; boost is capped at 4x, peaks at 0.8, and material below 0.008 RMS is not boosted. A constant gain per loop preserves internal dynamics and stereo balance rather than pumping with each beat. Peak protection can leave transient-heavy loops quieter. This is RMS normalization, not perceptual LUFS matching or dynamic compression. It applies to existing recordings when loaded, does not rewrite saved WAVs, and retains the mixer's output limiter and split-mix headroom.
+
 An eight-bar sequence contains 32 estimated beats. The upper-frequency part now uses one-beat cuts throughout the phrase: patterns such as `1 2 1 2`, `1 3 2 4`, and `3 4 1 2`, combined with bar reordering and source substitutions. The bass part keeps a steadier beat order and repeats two-bar groups. Each constructed sequence repeats consistently rather than randomizing on every pass.
 
-The crossover is a fourth-order **Linkwitz–Riley split at 150 Hz**: two cascaded second-order Butterworth sections per band (24 dB/octave slopes). Low and high from the same recording sum to flat magnitude, with a common phase shift. Normally, the mixer selects different compatible recordings for the two bands. With only one suitable recording, its bands can use different cuts/positions instead.
+The crossover is a fourth-order **Linkwitz–Riley split at 220 Hz**: two cascaded second-order Butterworth sections per band (24 dB/octave slopes). Low and high from the same recording sum to flat magnitude, with a common phase shift. Normally, the mixer selects different compatible recordings for the two bands. With only one suitable recording, its bands can use different cuts/positions instead.
 
 This is frequency separation, not instrument separation: the bass part includes all low-frequency energy, and vocals, percussion, and melody can all remain in the upper part. Combining recordings leaves extra headroom and uses a soft peak limiter. Tiny fades at discontinuous cuts reduce clicks. Band preparation and disk access happen on the storage worker, not in the audio renderer.
+
+Flat crossover summation assumes the same aligned source and equal gains. Different recordings (or different slices) do not satisfy that assumption: for equal-level uncorrelated material, the two -6 dB contributions give an expected 3 dB power dip at the crossover. Independent band normalization also changes the balance. There is no automatic crossover EQ boost; a fixed correction could overemphasize correlated material. The upper/bass listening button filters the final mix again, so solo listening adds attenuation near the boundary; Both bypasses that extra monitor filtering.
 
 **Automatic timing: two steady passes, then a crossfade lasting one complete pass.** At 128 BPM, each eight-bar pass is about 15 seconds, so automatic evolution begins after about 30 seconds and blends over the following 15 seconds. The incoming sequence is audible during the crossfade, then receives its own two steady passes. Pressing `>` requests an earlier transition on the next phrase boundary.
 
@@ -48,7 +56,7 @@ This displays recording provenance, not instruments. Bar numbers use an estimate
 
 The library now stores **1,024 recordings**, up from 48. A full library uses roughly **2–4 GB** of WAV audio depending on tempo. At capacity, new collection pauses; older recordings are not automatically erased.
 
-The full catalogue holds metadata only. A rotating working set loads **up to 16 recordings**, including the sources referenced anywhere in the current and incoming sequences. Other candidates refresh about every 20 seconds and after captures/rejections. Tempo/key matches and different captures are preferred. Full-resolution audio and both filtered bands are cached only for that working set. Temporary overlap during a refresh and the capture buffers means memory use can still reach several hundred MB, but it does not grow with all 1,024 recordings.
+The full catalogue holds metadata only. A rotating working set loads **up to 16 recordings**, including the sources referenced anywhere in the current and incoming sequences. Other candidates refresh about every 20 seconds and after captures/rejections. Tempo matches and different captures are preferred. Full-resolution audio and both filtered bands are cached only for that working set. Temporary overlap during a refresh and the capture buffers means memory use can still reach several hundred MB, but it does not grow with all 1,024 recordings.
 
 Each original source is a 44.1 kHz, 16-bit stereo WAV under `library/` with a companion `.txt` containing tempo, confidence, source, key estimate, and capture/bar identity. **WAVs remain source material; cuts and band combinations are created during playback.** Keep each WAV together with its text file when backing up. Arrangements themselves are not saved between runs.
 
@@ -58,9 +66,9 @@ Older recordings remain compatible. Their key can be estimated on loading and th
 
 Tempo analysis searches **90–175 BPM**. The master tempo remains fixed. Sources are sped up or slowed down to match it, permitting playback-speed ratios from **0.90 to 1.10** (up to a 10% speed change). This admits the full 130–140 BPM range in either direction; larger mismatches are skipped. Both source selection and the rotating library use this limit. For example, 130 BPM played at 140 BPM runs at 1.077× speed.
 
-Speed changes also shift pitch: pitch-preserving time stretching is not implemented. Key matching and displayed key estimates account for this shift, rounded to the nearest semitone. Fractional-semitone detuning and different chord progressions can still cause clashes.
+Speed changes also shift pitch: pitch-preserving time stretching is not implemented. Displayed key estimates account for this shift, rounded to the nearest semitone. Fractional-semitone detuning and different chord progressions can still cause clashes.
 
-Key estimates use spectral pitch-class profiles. Known incompatible keys are skipped; uncertain keys remain permissive. Estimates can be wrong or ambiguous, and key compatibility alone cannot guarantee matching chord progressions. Beat estimates can drift through track changes or choose half/double time. More varied source recordings and listening feedback remain important.
+Key estimates use spectral pitch-class profiles. Key estimates are displayed but do not currently restrict source selection. Estimates can be wrong or ambiguous, and key compatibility alone cannot guarantee matching chord progressions. Beat estimates can drift through track changes or choose half/double time. More varied source recordings and listening feedback remain important.
 
 Only direct HTTP/HTTPS MP3 streams are supported: not AAC, HLS, playlist files, or station web pages. The original radio-to-remix fade is not synchronized to the delayed live station. These laptop buffers/filters are not yet an RP2350 implementation.
 

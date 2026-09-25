@@ -269,6 +269,7 @@ void Engine::outputLoop(bool mute) {
     }
     music::Mixer mixer;
     Reverb reverb;
+    music::FrequencyMonitor monitor;
     double mixBlend = 0, volume = 0, liveGain = 0;
     bool liveStarted = false;
     music::Frame lastLive{};
@@ -306,6 +307,7 @@ void Engine::outputLoop(bool mute) {
                 auto tail = reverb.process(loop, reverbSend);
                 music::Frame f{float((lastLive.l * liveGain * (1 - mixBlend) * 0.6 + (loop.l + tail.l) * mixBlend) * volume),
                                float((lastLive.r * liveGain * (1 - mixBlend) * 0.6 + (loop.r + tail.r) * mixBlend) * volume)};
+                f = monitor.process(f, monitor_.load());
                 peak = std::max({peak, double(std::abs(f.l)), double(std::abs(f.r))});
                 for (int ch = 0; ch < 2; ++ch) {
                     float x = ch ? f.r : f.l;

@@ -1,9 +1,22 @@
 #include "music.hpp"
 #include <cmath>
+#include <algorithm>
 
 namespace music {
 namespace {
-// Two cascaded Q=1/sqrt(2) sections: fourth-order Linkwitz-Riley at 150 Hz.
+// Constant stereo-linked gain preserves dynamics and stereo balance. Limit
+// boosts to 12 dB and leave headroom; near-silent material is never boosted.
+float levelGain(const std::vector<Frame>& audio, double target) {
+    double energy = 0, peak = 0;
+    for (auto f : audio) {
+        energy += (double(f.l) * f.l + double(f.r) * f.r) * 0.5;
+        peak = std::max({peak, double(std::abs(f.l)), double(std::abs(f.r))});
+    }
+    double rms = std::sqrt(energy / audio.size());
+    if (rms < 0.008) return 1;
+    return float(std::min({4.0, target / rms, 0.8 / std::max(peak, 1e-9)}));
+}
+// Two cascaded Q=1/sqrt(2) sections: fourth-order Linkwitz-Riley at 220 Hz.
 // Low + high has flat magnitude, with the expected common all-pass phase shift.
 struct Biquad {
     double b0, b1, b2, a1, a2;
@@ -28,6 +41,23 @@ struct Biquad {
     }
 };
 }
+struct FrequencyMonitor::Impl {
+    Biquad low1{false}, low2{false}, high1{true}, high2{true};
+    double upper = 0, bass = 0;
+};
+FrequencyMonitor::FrequencyMonitor() : impl_(std::make_unique<Impl>()) {}
+FrequencyMonitor::~FrequencyMonitor() = default;
+Frame FrequencyMonitor::process(Frame input, int mode) {
+    auto& s = *impl_;
+    auto low = s.low2.next(s.low1.next(input));
+    auto high = s.high2.next(s.high1.next(input));
+    // Keep both filters warm and crossfade the monitor over about 20 ms.
+    s.upper += ((mode == 1 ? 1.0 : 0.0) - s.upper) * 0.005;
+    s.bass += ((mode == 2 ? 1.0 : 0.0) - s.bass) * 0.005;
+    double dry = 1 - s.upper - s.bass;
+    return {float(input.l * dry + high.l * s.upper + low.l * s.bass),
+            float(input.r * dry + high.r * s.upper + low.r * s.bass)};
+}
 void prepareBands(Clip& clip) {
     if (clip.audio.empty() || clip.low.size() == clip.audio.size()) return;
     Biquad low1(false), low2(false), high1(true), high2(true);
@@ -41,5 +71,8 @@ void prepareBands(Clip& clip) {
         clip.low[i] = low2.next(low1.next(clip.audio[i]));
         clip.high[i] = high2.next(high1.next(clip.audio[i]));
     }
+    clip.playbackGain = levelGain(clip.audio, 0.16);
+    clip.lowGain = levelGain(clip.low, 0.10);
+    clip.highGain = levelGain(clip.high, 0.125);
 }
 }
