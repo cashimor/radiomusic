@@ -53,6 +53,36 @@ private:
     double position_ = 0;
     std::vector<music::Frame> pending_;
 };
+class Reverb {
+    struct Delay {
+        explicit Delay(size_t size) : samples(size) {}
+        float process(float input, float feedback) {
+            float delayed = samples[position];
+            samples[position] = input + delayed * feedback;
+            if (++position == samples.size()) position = 0;
+            return delayed;
+        }
+        std::vector<float> samples;
+        size_t position = 0;
+    };
+    static float allpass(Delay& delay, float input) {
+        float delayed = delay.process(input, 0.5f);
+        return delayed - input * 0.5f;
+    }
+    std::array<Delay, 4> left_{{Delay(1116), Delay(1188), Delay(1277), Delay(1356)}};
+    std::array<Delay, 4> right_{{Delay(1139), Delay(1211), Delay(1301), Delay(1381)}};
+    Delay leftDiffusion_{556}, rightDiffusion_{579};
+public:
+    music::Frame process(music::Frame input, bool send) {
+        float l = 0, r = 0;
+        for (size_t i = 0; i < left_.size(); ++i) {
+            l += left_[i].process(send ? input.l * 0.34f : 0.0f, 0.88f);
+            r += right_[i].process(send ? input.r * 0.34f : 0.0f, 0.88f);
+        }
+        return {allpass(leftDiffusion_, l * 0.25f) * 1.35f,
+                allpass(rightDiffusion_, r * 0.25f) * 1.35f};
+    }
+};
 }
 
 Engine::Engine(std::filesystem::path library) : directory_(std::move(library)) {
@@ -72,6 +102,7 @@ bool Engine::start(const std::wstring& url, bool mute) {
         live_.clear(); capture_.clear(); jobs_.clear(); preview_.clear(); audible_.clear(); library_.clear(); pinned_.clear();
         rejectedIds_.clear();
         rejectedCaptures_.clear();
+        usedLoopIds_.clear();
         capture_.reserve(captureFrames); source_ = utf8(url);
     }
     evolve_ = false; running_ = true;
@@ -237,6 +268,7 @@ void Engine::outputLoop(bool mute) {
         if (waveOutPrepareHeader(device, &headers[i], sizeof(WAVEHDR)) != MMSYSERR_NOERROR) running_ = false;
     }
     music::Mixer mixer;
+    Reverb reverb;
     double mixBlend = 0, volume = 0, liveGain = 0;
     bool liveStarted = false;
     music::Frame lastLive{};
@@ -261,6 +293,7 @@ void Engine::outputLoop(bool mute) {
             std::array<music::Frame, blockFrames> preview{};
             bool previewReady = false;
             for (size_t i = 0; i < blockFrames; ++i) {
+                bool reverbSend = reverb_.load() && !radio_ && mixBlend > 0 && mixer.reverbSend();
                 auto loop = mixer.next(library);
                 bool wantMix = mixer.ready() && !radio_;
                 double fadeStep = mixer.bpm() > 0 ? mixer.bpm() / (60.0 * music::sampleRate * 16) : 1.0 / music::sampleRate;
@@ -270,8 +303,9 @@ void Engine::outputLoop(bool mute) {
                 if (haveLive) lastLive = live[i];
                 // Smooth master gain, including slider changes, prevents discontinuities.
                 volume += (double(volume_.load()) - volume) * 0.002;
-                music::Frame f{float((lastLive.l * liveGain * (1 - mixBlend) * 0.6 + loop.l * mixBlend) * volume),
-                               float((lastLive.r * liveGain * (1 - mixBlend) * 0.6 + loop.r * mixBlend) * volume)};
+                auto tail = reverb.process(loop, reverbSend);
+                music::Frame f{float((lastLive.l * liveGain * (1 - mixBlend) * 0.6 + (loop.l + tail.l) * mixBlend) * volume),
+                               float((lastLive.r * liveGain * (1 - mixBlend) * 0.6 + (loop.r + tail.r) * mixBlend) * volume)};
                 peak = std::max({peak, double(std::abs(f.l)), double(std::abs(f.r))});
                 for (int ch = 0; ch < 2; ++ch) {
                     float x = ch ? f.r : f.l;
@@ -285,6 +319,9 @@ void Engine::outputLoop(bool mute) {
                 audible_ = mixer.audible(); state_.audible.clear();
                 pinned_ = mixer.sources();
                 for (auto& clip : audible_) state_.audible.push_back(clip->id);
+                if (!radio_ && mixBlend > 0)
+                    for (const auto& id : state_.audible) usedLoopIds_.insert(id);
+                state_.usedLoops = usedLoopIds_.size();
                 state_.mixing = mixer.ready(); state_.transitioning = mixer.transitioning();
                 if (state_.transitioning) state_.waiting = false;
                 state_.bpm = mixer.bpm(); state_.beat = mixer.beat(); state_.peak = std::max(state_.peak, peak);

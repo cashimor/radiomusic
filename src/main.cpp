@@ -13,9 +13,9 @@ namespace {
 constexpr wchar_t defaultStation[] = L"https://0nlineradio.radioho.st/technolovers-trance";
 constexpr COLORREF background = RGB(16, 21, 29), panel = RGB(26, 33, 44), muted = RGB(151, 168, 189),
     foreground = RGB(236, 243, 249), accent = RGB(95, 226, 183);
-enum { Start = 101, Evolve, Reject, Radio, Folder, Url, Volume, Playful, Split };
+enum { Start = 101, Evolve, Reject, Radio, Folder, Url, Volume, Playful, Split, Reverb };
 std::unique_ptr<Engine> engine;
-HWND urlBox, startButton, evolveButton, rejectButton, radioButton, folderButton, slider, playfulButton, splitButton;
+HWND urlBox, startButton, evolveButton, rejectButton, radioButton, folderButton, slider, playfulButton, splitButton, reverbButton;
 HFONT bodyFont, titleFont, numberFont, smallFont;
 HBRUSH editBrush;
 float scale = 1;
@@ -90,7 +90,8 @@ void layout(HWND hwnd) {
     MoveWindow(splitButton, px(588), px(576), px(220), px(40), TRUE);
     MoveWindow(playfulButton, px(28), px(628), px(208), px(36), TRUE);
     MoveWindow(folderButton, px(w - 190), px(628), px(162), px(36), TRUE);
-    MoveWindow(slider, px(318), px(631), px(160), px(30), TRUE);
+    MoveWindow(reverbButton, px(244), px(628), px(150), px(36), TRUE);
+    MoveWindow(slider, px(480), px(631), px(140), px(30), TRUE);
 }
 void refreshButtons() {
     EnableWindow(urlBox, !active);
@@ -99,6 +100,7 @@ void refreshButtons() {
     SetWindowTextW(radioButton, engine->radio() ? L"Return to remix" : L"Hear live radio");
     SetWindowTextW(playfulButton, engine->playful() ? L"Rearrangement: on" : L"Rearrangement: off");
     SetWindowTextW(splitButton, engine->split() ? L"150 Hz split: on" : L"150 Hz split: off");
+    SetWindowTextW(reverbButton, engine->reverb() ? L"Reverb: on" : L"Reverb: off");
 }
 void paint(HWND hwnd, HDC target) {
     RECT rc; GetClientRect(hwnd, &rc);
@@ -127,8 +129,8 @@ void paint(HWND hwnd, HDC target) {
     text(dc, L"MIX TEMPO", 46, 213, cardWidth - 30, 20, smallFont, muted);
     text(dc, bpm.str(), 46, 238, cardWidth - 30, 50, numberFont, accent);
     int x = 46 + cardWidth + 12;
-    text(dc, L"SAVED LOOPS", x, 213, cardWidth - 30, 20, smallFont, muted);
-    text(dc, std::to_wstring(s.librarySize) + L" / 1024", x, 238, cardWidth - 30, 50, numberFont, foreground);
+    text(dc, L"USED / SAVED LOOPS", x, 213, cardWidth - 30, 20, smallFont, muted);
+    text(dc, std::to_wstring(s.usedLoops) + L" / " + std::to_wstring(s.librarySize), x, 238, cardWidth - 30, 50, numberFont, foreground);
     x += cardWidth + 12;
     text(dc, L"NEXT CAPTURE", x, 213, cardWidth - 30, 20, smallFont, muted);
     text(dc, active ? std::to_wstring(int(s.captureSeconds)) + L" / 48 s" : L"Paused", x, 238, cardWidth - 30, 50, numberFont, foreground);
@@ -143,8 +145,8 @@ void paint(HWND hwnd, HDC target) {
          s.waiting ? L"EVOLUTION QUEUED FOR THE NEXT PHRASE" : L"NEXT ARRANGEMENT APPEARS DURING A TRANSITION", 28, 464, w - 56, 22, smallFont, accent);
     drawBars(dc, s.incomingBars, 489, w, int(s.beat), cursor && s.transitioning);
     text(dc, s.activity, 28, 678, w - 56, 42, bodyFont, foreground);
-    text(dc, L"Volume", 256, 635, 65, 25, smallFont, muted);
-    text(dc, std::to_wstring(s.residentClips) + L" sources loaded", 493, 635, w - 700, 25, smallFont, muted);
+    text(dc, L"Volume", 410, 635, 65, 25, smallFont, muted);
+    text(dc, std::to_wstring(s.residentClips) + L" loaded", 628, 635, w - 820, 25, smallFont, muted);
     text(dc, s.connection, 28, 727, w - 56, 42, smallFont, muted);
     BitBlt(target, 0, 0, rc.right, rc.bottom, dc, 0, 0, SRCCOPY);
     SelectObject(dc, oldBitmap); DeleteObject(bitmap); DeleteDC(dc);
@@ -163,6 +165,7 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
         folderButton = button(hwnd, L"Open library", Folder);
         playfulButton = button(hwnd, L"Rearrangement: on", Playful);
         splitButton = button(hwnd, L"150 Hz split: on", Split);
+        reverbButton = button(hwnd, L"Reverb: off", Reverb);
         slider = CreateWindowW(TRACKBAR_CLASSW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_HORZ | TBS_NOTICKS,
                                0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(Volume), nullptr, nullptr);
         SendMessageW(slider, TBM_SETRANGE, TRUE, MAKELONG(0, 100)); SendMessageW(slider, TBM_SETPOS, TRUE, 55);
@@ -204,6 +207,7 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
         case Radio: engine->setRadio(!engine->radio()); refreshButtons(); break;
         case Playful: engine->setPlayful(!engine->playful()); refreshButtons(); break;
         case Split: engine->setSplit(!engine->split()); refreshButtons(); break;
+        case Reverb: engine->setReverb(!engine->reverb()); refreshButtons(); break;
         case Folder: {
             std::error_code ec; std::filesystem::create_directories(engine->libraryPath(), ec);
             ShellExecuteW(hwnd, L"open", engine->libraryPath().c_str(), nullptr, nullptr, SW_SHOWNORMAL); break;

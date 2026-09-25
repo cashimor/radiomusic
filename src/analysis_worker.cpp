@@ -8,12 +8,12 @@ void Engine::analysisLoop() {
     bool scanned = store.scan();
     auto refresh = [&] {
         std::vector<music::ClipPtr> pinned, previous;
-        double bpm; int key;
+        double bpm;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            pinned = pinned_; previous = library_; bpm = state_.bpm; key = state_.key;
+            pinned = pinned_; previous = library_; bpm = state_.bpm;
         }
-        auto working = store.workingSet(bpm, key, pinned, previous);
+        auto working = store.workingSet(bpm, pinned, previous);
         {
             std::lock_guard<std::mutex> lock(mutex_);
             working.erase(std::remove_if(working.begin(), working.end(), [&](const auto& c) {

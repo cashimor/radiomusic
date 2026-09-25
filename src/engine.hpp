@@ -11,6 +11,7 @@ struct Snapshot {
     double bpm = 0, beat = 0, captureSeconds = 0, confidence = 0, peak = 0;
     size_t librarySize = 0;
     size_t residentClips = 0;
+    size_t usedLoops = 0;
     int key = -1;
     double fade = 0;
     int passes = 0;
@@ -32,6 +33,8 @@ public:
     bool split() const { return split_; }
     void setPlayful(bool value) { playful_ = value; }
     bool playful() const { return playful_; }
+    void setReverb(bool value) { reverb_ = value; }
+    bool reverb() const { return reverb_; }
     void setVolume(float value) { volume_ = value; }
     void setRadio(bool value) { radio_ = value; }
     bool radio() const { return radio_; }
@@ -46,7 +49,7 @@ private:
     void connection(std::wstring text);
     std::filesystem::path directory_;
     std::atomic<bool> running_{false}, evolve_{false}, radio_{false};
-    std::atomic<bool> playful_{true}, split_{true};
+    std::atomic<bool> playful_{true}, split_{true}, reverb_{false};
     std::atomic<float> volume_{0.55f};
     std::thread network_, analysis_, output_;
     std::mutex mutex_;
@@ -59,5 +62,6 @@ private:
     std::vector<music::ClipPtr> erase_;
     std::unordered_set<std::string> rejectedIds_;
     std::unordered_set<std::string> rejectedCaptures_;
+    std::unordered_set<std::string> usedLoopIds_;
     std::string source_;
 };

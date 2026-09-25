@@ -73,6 +73,7 @@ public:
     void requestEvolution() { requested_ = true; }
     void setPlayful(bool value) { if (playful_ != value) requested_ = true; playful_ = value; }
     void setSplit(bool value) { if (split_ != value) requested_ = true; split_ = value; }
+    bool reverbSend() const;
     Frame next(const std::vector<ClipPtr>& library);
     std::vector<ClipPtr> audible() const;
     std::vector<ClipPtr> sources() const;

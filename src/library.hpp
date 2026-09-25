@@ -11,7 +11,7 @@ public:
     size_t size() const { return entries_.size(); }
     bool add(const Clip& clip);
     bool reject(const Clip& clip);
-    std::vector<ClipPtr> workingSet(double bpm, int key, const std::vector<ClipPtr>& pinned,
+    std::vector<ClipPtr> workingSet(double bpm, const std::vector<ClipPtr>& pinned,
                                     const std::vector<ClipPtr>& previous);
 private:
     std::filesystem::path directory_;

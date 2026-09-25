@@ -84,7 +84,8 @@ int main() {
         }
         check(std::abs(start - phrase * 2) <= 3, "Automatic transition did not start after exactly two passes");
         check(std::abs((finish - start) - phrase) <= 3, "Crossfade did not last exactly one pass");
-        check(timed.audible().size() == 1 && timed.audible()[0] == b, "Key/tempo matching chose the wrong source");
+        check(timed.audible().size() == 1 && timed.audible()[0] != wrongTempo && timed.audible()[0] != a,
+              "Tempo limit was ignored or the mixer failed to evolve");
         check(timed.passes() == 0, "Incoming sequence did not receive two fresh steady passes");
         check(std::abs(timed.bpm() - 120) < 0.001, "Tempo changed when the 130 BPM source joined the 120 BPM mix");
         b->rejected = true;
@@ -159,11 +160,11 @@ int main() {
             meta << "120 0.9 32\n\"test\"\nRM2 0 0.9 " << std::quoted(id) << " 0 0\n";
         }
         music::LibraryStore store(dir); check(store.scan() && store.size() == 81, "Catalogue still limited to 48 recordings");
-        auto pool = store.workingSet(120, 0, {}, {});
+        auto pool = store.workingSet(120, {}, {});
         check(pool.size() == music::maxResidentClips, "Resident working set is not bounded");
         auto pinned = pool.front(); std::unordered_set<std::string> seen;
         for (const auto& c : pool) seen.insert(c->id);
-        auto rotated = store.workingSet(120, 0, {pinned}, pool);
+        auto rotated = store.workingSet(120, {pinned}, pool);
         check(rotated.size() == music::maxResidentClips && rotated.front() == pinned, "Playing source was not pinned through pool rotation");
         bool fresh = false; for (const auto& c : rotated) fresh = fresh || !seen.count(c->id);
         check(fresh, "Working set did not rotate across the larger library");

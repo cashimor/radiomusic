@@ -47,7 +47,7 @@ bool LibraryStore::reject(const Clip& clip) {
     entries_.erase(std::remove_if(entries_.begin(), entries_.end(), [&](const auto& c) { return c->captureId == clip.captureId; }), entries_.end());
     return good;
 }
-std::vector<ClipPtr> LibraryStore::workingSet(double bpm, int key, const std::vector<ClipPtr>& pinned,
+std::vector<ClipPtr> LibraryStore::workingSet(double bpm, const std::vector<ClipPtr>& pinned,
                                              const std::vector<ClipPtr>& previous) {
     std::vector<ClipPtr> result;
     std::unordered_map<std::string, ClipPtr> cached;
@@ -61,10 +61,7 @@ std::vector<ClipPtr> LibraryStore::workingSet(double bpm, int key, const std::ve
     std::vector<size_t> order(entries_.size()); std::iota(order.begin(), order.end(), 0);
     std::shuffle(order.begin(), order.end(), random_);
     // Tempo/key matches first; rotate the rest so a new tempo remains possible after rejection.
-    auto rank = [&](const ClipPtr& c) {
-        if (bpm <= 0) return 0;
-        return compatibleTempo(c->bpm, bpm) && compatibleKeys(key, playbackKey(*c, bpm)) ? 1 : 0;
-    };
+    auto rank = [&](const ClipPtr& c) { return bpm > 0 && compatibleTempo(c->bpm, bpm) ? 1 : 0; };
     std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return rank(entries_[a]) > rank(entries_[b]); });
     for (int tier = 1; tier >= 0 && result.size() < maxResidentClips; --tier)
     for (int pass = 0; pass < 2 && result.size() < maxResidentClips; ++pass) {

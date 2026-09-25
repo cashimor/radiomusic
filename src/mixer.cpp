@@ -5,20 +5,11 @@
 namespace music {
 ClipPtr Mixer::pick(const std::vector<ClipPtr>& library, bool anyTempo, const ClipPtr& avoid) {
     ClipPtr choice; int count = 0, bestRank = -1;
-    auto compatible = [&](const Arrangement& plan, int key) {
-        for (const auto& b : plan) if (b.clip && !compatibleKeys(playbackKey(*b.clip, bpm_), key)) return false;
-        return true;
-    };
     for (const auto& c : library) {
         if (c->rejected || c == current_ || c == incoming_ || c == avoid || c->audio.empty()) continue;
-        int candidateKey = anyTempo ? c->key : playbackKey(*c, bpm_);
-        if (!anyTempo && (!compatibleTempo(c->bpm, bpm_) || !compatibleKeys(playbackKey(*current_, bpm_), candidateKey))) continue;
-        if (avoid && !compatibleKeys(playbackKey(*avoid, bpm_), candidateKey)) continue;
-        if (!anyTempo && (!compatible(sequence_.upper, candidateKey) ||
-            (sequence_.split && !compatible(sequence_.bass, candidateKey)))) continue;
+        if (!anyTempo && !compatibleTempo(c->bpm, bpm_)) continue;
         int rank = !anyTempo && c->captureId != current_->captureId ? 2 : 0;
         if (avoid && c->captureId != avoid->captureId) rank += 2;
-        if (!anyTempo && c->key >= 0 && current_->key >= 0) ++rank;
         if (rank < bestRank) continue;
         if (rank > bestRank) { bestRank = rank; count = 0; }
         if (std::uniform_int_distribution<int>(1, ++count)(random_) == 1) choice = c;
@@ -43,15 +34,58 @@ Mixer::Sequence Mixer::compose(const std::vector<ClipPtr>& library) {
                                       {0, 1, 4, 5, 2, 3, 6, 7}, {4, 5, 0, 1, 4, 6, 2, 7}};
         constexpr std::array<int, 4> chops[] = {{{0, 1, 0, 1}}, {{0, 2, 1, 3}}, {{2, 3, 0, 1}}, {{0, 1, 2, 2}}};
         int variation = int((variations_ - 1) % 4);
+        // Pick a few change points for the eight-bar phrase. Fewer cuts are
+        // common, while five cuts occasionally create short one-bar surprises.
+        constexpr int changeWeights[] = {0, 28, 30, 23, 14, 5};
+        int draw = std::uniform_int_distribution<int>(1, 100)(random_), changes = 1;
+        for (int count = 1; count <= 5; ++count) {
+            if (draw <= changeWeights[count]) { changes = count; break; }
+            draw -= changeWeights[count];
+        }
+        std::array<int, 7> possibleCuts{1, 2, 3, 4, 5, 6, 7};
+        std::shuffle(possibleCuts.begin(), possibleCuts.end(), random_);
+        std::array<bool, 8> cut{};
+        for (int i = 0; i < changes; ++i) cut[possibleCuts[i]] = true;
+
+        // The alternate anchor is used throughout the phrase; a third source
+        // appears occasionally when the resident pool has another match.
+        std::array<ClipPtr, 3> sources{upper, current_, {}};
+        int sourceCount = 2;
+        if (std::uniform_int_distribution<int>(1, 4)(random_) == 1) {
+            auto third = pick(library, false, upper);
+            if (third && third != current_) { sources[2] = third; sourceCount = 3; }
+        }
+        int runSource = 0; // Keep the phrase's first bar on its main selected source.
         for (int i = 0; i < 8; ++i) {
             result.upper[i].index = orders[variation][i];
             result.upper[i].beats = chops[(i + variation) % 4];
-            // Additional source changes at two-bar boundaries; the bass remains rhythmically stable.
-            if (i % 4 >= 2 && current_ != upper && (!result.split || !current_->high.empty())) result.upper[i].clip = current_;
+            if (i > 0 && cut[i]) runSource = (runSource + 1) % sourceCount;
+            auto source = sources[runSource];
+            if (source && (!result.split || !source->high.empty())) result.upper[i].clip = source;
             result.bass[i].index = (i / 4) * 4 + (i % 2);
         }
     }
     return result;
+}
+bool Mixer::reverbSend() const {
+    if (!current_) return false;
+    const int bar = std::min(7, int(phase_ * 8));
+    const int next = (bar + 1) % 8;
+    auto changeScore = [](const Bar& a, const Bar& b) {
+        if (!a.clip || !b.clip) return a.clip == b.clip ? 0 : 3;
+        int score = 0;
+        if (a.clip->captureId != b.clip->captureId) score += 3;
+        else if (a.clip != b.clip) score += 2;
+        if (a.index != b.index) ++score;
+        if (a.beats != b.beats) ++score;
+        return score;
+    };
+    auto bigChange = [&](const Sequence& sequence) {
+        int score = changeScore(sequence.upper[bar], sequence.upper[next]);
+        if (sequence.split) score += changeScore(sequence.bass[bar], sequence.bass[next]);
+        return score >= 2;
+    };
+    return bigChange(sequence_) || (changing_ && bigChange(nextSequence_));
 }
 void Mixer::evolve(const std::vector<ClipPtr>& library) {
     nextSequence_ = compose(library); incoming_ = nextSequence_.upper[0].clip;
