@@ -1,6 +1,6 @@
 # Radiomusic: desktop handoff and Android plan
 
-Prepared 24 September 2026. This document carries the relevant laptop conversation to a new desktop session. Android work has been discussed only: no Android project or tools have been installed by this task. Ask the user to begin implementation before starting it.
+Prepared 24 September 2026; updated 25 September 2026. This document carries the relevant laptop conversation to a desktop session. The Windows app remains intact. The Android build now plays/remixes saved loops in the background and captures radio over Wi-Fi.
 
 ## Purpose and user preferences
 
@@ -39,21 +39,19 @@ Keep C++ for the music engine. A distant possibility is an RP2350 radio project,
 - Full library is approximately 2.5–2.7 GB at 130–140 BPM. Resident original audio plus two floating-point frequency bands can use several hundred MB, particularly during refresh. Phone memory tuning is required.
 - Arrangements are not persisted; recordings, metadata, and bans are.
 
-## Android design discussed (not yet implemented)
+## Android milestone (radio capture implemented and device-verified)
 
-1. Preserve/share the portable C++ music core and keep the Windows application working.
-2. Add an Android project, probably a Kotlin touch interface with a small bridge into C++ using the NDK/CMake.
-3. Replace WinHTTP with Android-capable networking. Existing minimp3 decoding can be reused.
-4. Replace waveOut with Android audio output, preferably Oboe. Adapt sample-rate handling and keep allocations, disk access and blocking work out of the audio callback.
-5. Move reusable reverb/DSP out of the Windows-specific engine where needed.
-6. Support screen-off playback with Android's media playback foreground service/notification, audio focus, calls, route changes, and network interruptions.
-7. Let the user select a library folder on the SD card using Android's Storage Access Framework. Persist access permission; this requires a storage adapter rather than assuming arbitrary C++ filesystem paths work with document URIs. A user-owned folder can survive uninstalling the app. Store the index/settings locally and preload selected audio to RAM; never depend on SD reads finishing in the playback callback. Handle missing cards gracefully. Include bans and metadata in library transfer/export.
-8. Add Wi-Fi-only capture, enabled by default. On cellular, close/avoid the radio stream and remix the saved library. On Wi-Fi return, resume capture. With no saved material, show Waiting for Wi-Fi. Constrain the actual radio connection to Wi-Fi so a network handover cannot silently transfer it to cellular; checking connectivity occasionally is insufficient. Metered Wi-Fi/hotspots are a separate policy choice to settle when implementing.
-9. First milestone: play existing saved loops on the real phone, with basic controls and provenance display. Then add radio capture, SD library management, and background operation. Measure CPU, RAM, glitches and battery use rather than promising performance from specifications alone.
+1. The `android/` project builds a debug APK with a Java touch UI, JNI bridge and the existing C++ music core. Android audio uses NDK AAudio.
+2. The app reads WAV loops and their metadata from the fixed internal path `/storage/emulated/0/Documents/Radiomusic/loops`. During playback, Android rescans that directory every 20 seconds and replaces its candidate working set with up to 16 resident loops, so recordings added to the directory become eligible without a UI refresh. The library catalogue itself is metadata-only. It currently relies on legacy external-storage access for this private, personal install. Android scoped-storage changes may require moving back to a Storage Access Framework folder grant and importing files to private app storage on newer target SDKs.
+3. Controls include play/pause, start/stop radio capture, and live-radio/remix monitoring. A foreground service owns playback and the media session; watch, lock-screen, notification and headset transport controls use Android's system media controls.
+4. Radio capture requests a validated Wi-Fi network and opens the station URL on that specific Android `Network`, preventing the station connection from falling back to cellular. Java streams the MP3 bytes to native minimp3 decoding. The native path resamples to 44.1 kHz, plays the live station, analyzes 48-second windows with the shared C++ analyzer and saves extracted WAV/metadata pairs into the loop folder. Reconnect resets the partial decoder/capture window; reconnect attempts remain Wi-Fi-only.
+5. The audio renderer mixes live radio with the evolving loop mix. “Hear live radio” forces live monitoring; “Return to remix” fades toward the remix while capture continues. As newly captured loops are saved, the existing 20-second rescan rotates the resident candidate pool.
+6. Device verification on 25 September: the station returned HTTP 200 `audio/mpeg` at 192 kbps. Native decoding ran at 44.1 kHz stereo; a capture analyzed at 136 BPM / 0.881 confidence and extracted/saved three loops. Nine new WAV loops appeared on the device during verification. Storage read/write permission is needed because this personal build targets API 28 and writes into shared Documents. Keep disk/network work outside the AAudio callback.
+7. Next development steps: listen with the screen off, check reconnect and headset/watch behavior over longer sessions, and profile memory/CPU/battery during analysis and library rotation. Refine status reporting and test adding loops while the remix is already running. Radio capture still requires Wi-Fi; it does not use cellular as a fallback.
 
 ## Tooling and planning estimates
 
-Development tools belong on the desktop, not the phone. Testing with the actual phone over USB is preferred initially; the emulator is optional.
+Development tools belong on the desktop, not the phone. This machine now has Microsoft OpenJDK 21, Gradle 8.11.1, Android SDK API 36, Build Tools 36.0.0, NDK 30.0.16248370, CMake 3.22.1 and platform-tools installed under `%LOCALAPPDATA%`. Google SDK package licenses were accepted at the user's direction. Testing with the actual phone over USB is preferred initially; the emulator remains optional.
 
 Approximate downloads discussed: Android Studio 1.5 GB; Android SDK/build tools 0.5–1.5 GB; Windows NDK about 730 MB; CMake/Gradle/project dependencies 0.3–1 GB. Allow roughly 3–5 GB downloads and 15–25 GB disk space without an emulator. An emulator/system image adds roughly 2–4 GB downloads. These are planning estimates, not pinned package requirements; verify current versions/sizes at installation time.
 
@@ -63,12 +61,14 @@ Official references consulted:
 - https://developer.android.com/studio/projects/install-ndk
 - https://developer.android.com/games/sdk/oboe
 - https://developer.android.com/media/media3/session/background-playback
+- https://developer.android.com/develop/connectivity/network-ops/reading-network-state
+- https://developer.android.com/reference/android/net/Network#openConnection(java.net.URL)
 - https://developer.android.com/training/data-storage/shared/documents-files
 - https://en-us.support.motorola.com/app/answers/detail/a_id/179364/reg/749642
 
 ## Source map and Windows checks
 
-- CMakeLists.txt: music_core shared code, Windows executable, core_tests.
+- CMakeLists.txt: music_core shared code, Windows executable, Android native library and core_tests.
 - src/music.hpp and music.cpp: shared types, beat analysis, extraction, WAV/metadata persistence.
 - src/features.cpp: key estimation and related helpers.
 - src/crossover.cpp: cached bass/high bands.
@@ -77,12 +77,13 @@ Official references consulted:
 - src/engine.cpp/.hpp: Windows networking/audio, engine state and reverb implementation.
 - src/analysis_worker.cpp: capture analysis and storage orchestration.
 - src/main.cpp: Windows interface and diagnostic modes.
+- android/: Java activity, Wi-Fi-bound station downloader, foreground media service and notification, JNI/AAudio/MP3 player and capture analyzer, Gradle wrapper and Android packaging.
 - tests/core_tests.cpp: audio and persistence regression tests.
 - vendor/: minimp3 and license/revision information.
 
 Windows build: Visual Studio 2022 Build Tools with Desktop development with C++ and CMake; run build.ps1. It configures/builds Release and runs CTest. Output: build/Release/Radiomusic.exe. Start Radiomusic.cmd launches it.
 
-Last tested state: successful Release build and all core tests passed after adding loop/band normalization, frequency auditioning, and moving the crossover to 220 Hz. Android has not been tested.
+Windows check on 25 September 2026: Release build and core test passed. Android debug APK built and installed on the Moto G Power 5G (2024), model `moto_g_power_5G___2024`. Device log review previously fixed JNI exports naming the old Activity class and missing storage access. Radio capture now connects only on Wi-Fi, decodes the default station MP3, and saves extracted loops. The phone's loop directory grew from 16 to 25 WAVs during testing. Final radio-capture APK: `android/app/build/outputs/apk/debug/app-debug.apk`. Longer screen-off, audio-quality and battery verification remains.
 
 The Windows process once remained alive after its window closed, blocking relinking. Close gracefully before rebuilding; investigate a remaining process if necessary. In the laptop agent sandbox, MSBuild needed an elevated/approved tool execution because duplicated PATH entries broke the sandboxed build environment; this may not apply on the desktop.
 
@@ -92,4 +93,4 @@ The accompanying Radiomusic-desktop-handoff.zip contains source, tests, vendor f
 
 Optionally copy the entire library/ folder separately, including WAVs, text metadata, rejection markers and rejected-captures.txt. Copy while Radiomusic is stopped for a consistent snapshot. Existing binaries in older portable archives may be stale; build from the supplied source.
 
-Open the extracted project in the desktop coding app and start with: "Read DESKTOP-HANDOFF.md and inspect the project. This is the Radiomusic project from my laptop. Help me continue planning the Android version; do not install tools or start the port until I ask."
+Build the APK from the project root with `cd android; .\build-apk.ps1`. The script sets this profile's JDK/SDK paths for the build; the Gradle wrapper downloads its distribution on first use. Install the resulting debug APK manually on an arm64 Android phone.

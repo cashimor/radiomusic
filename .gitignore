@@ -3,3 +3,7 @@
 /test-output/
 *.user
 /Radiomusic-*.zip
+/android/.gradle/
+/android/**/.cxx/
+/android/local.properties
+/android/**/build/

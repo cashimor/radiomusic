@@ -167,6 +167,10 @@ Frame Mixer::next(const std::vector<ClipPtr>& library) {
             }
         } else {
             ++repeats_;
+            if (repeatProtectionPending_) {
+                repeatProtectionPending_ = false;
+                repeatFinished_.store(true);
+            }
             if (requested_ || repeats_ >= steadyPasses) evolve(library);
         }
     }

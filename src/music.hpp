@@ -15,6 +15,7 @@ constexpr int steadyPasses = 2;
 constexpr int transitionPasses = 1;
 constexpr double maxSpeedChange = 0.10;
 constexpr size_t maxStoredClips = 1024;
+constexpr double maxStoredAudioSeconds = 60.0 * 60.0;
 constexpr size_t maxResidentClips = 16;
 constexpr double crossoverHz = 220.0;
 struct Frame { float l = 0, r = 0; };
@@ -82,6 +83,14 @@ bool writeWave(const std::filesystem::path& path, const std::vector<Frame>& audi
 class Mixer {
 public:
     void requestEvolution() { requested_ = true; }
+    void repeatCurrent() {
+        if (!current_) return;
+        changing_ = false; fade_ = 0; transitionCycles_ = 0;
+        nextSequence_ = {}; incoming_.reset(); phase_ = 0;
+        repeats_ = steadyPasses - 1; requested_ = false;
+        repeatProtectionPending_ = true;
+    }
+    bool takeRepeatFinished() { return repeatFinished_.exchange(false); }
     void setPlayful(bool value) { if (playful_ != value) requested_ = true; playful_ = value; }
     void setSplit(bool value) { if (split_ != value) requested_ = true; split_ = value; }
     bool reverbSend() const;
@@ -111,6 +120,8 @@ private:
     Sequence sequence_{}, nextSequence_{};
     unsigned variations_ = 0;
     bool changing_ = false, playful_ = true, split_ = true;
+    bool repeatProtectionPending_ = false;
+    std::atomic<bool> repeatFinished_{false};
     std::mt19937 random_{std::random_device{}()};
     double phase_ = 0, bpm_ = 0, fade_ = 0, gain_ = 0;
     int repeats_ = 0, transitionCycles_ = 0;
